@@ -3,9 +3,13 @@ import {
   database,
   gamesCollection,
   playersCollection,
+  roundsCollection,
   Game,
   GamePlayer,
+  Round,
+  Score,
 } from '@/database'
+import type { RoundData, RoundScore } from '@/components/RoundHistory'
 
 export interface CreateGameInput {
   name?: string
@@ -89,4 +93,52 @@ export async function getAllGames(): Promise<Game[]> {
   return await gamesCollection
     .query(Q.sortBy('started_at', Q.desc))
     .fetch()
+}
+
+/**
+ * Get all rounds for a game with their scores.
+ */
+export async function getRoundsWithScores(
+  gameId: string,
+  players: GamePlayer[]
+): Promise<RoundData[]> {
+  const rounds = await roundsCollection
+    .query(Q.where('game_id', gameId), Q.sortBy('round_number', Q.asc))
+    .fetch()
+
+  const playerMap = new Map(players.map((p) => [p.id, p.name]))
+
+  const roundsWithScores: RoundData[] = []
+
+  for (const round of rounds) {
+    const scores = await round.scores.fetch()
+
+    const roundScores: RoundScore[] = scores.map((score) => ({
+      playerId: score.playerId,
+      playerName: playerMap.get(score.playerId) || 'Unknown',
+      rawScore: score.rawScore,
+      bonusApplied: score.bonusApplied,
+      finalScore: score.finalScore,
+      totalAfter: score.totalAfter,
+    }))
+
+    roundsWithScores.push({
+      id: round.id,
+      roundNumber: round.roundNumber,
+      scores: roundScores,
+      createdAt: round.createdAt,
+    })
+  }
+
+  return roundsWithScores
+}
+
+/**
+ * Get the number of rounds played in a game.
+ */
+export async function getRoundCount(gameId: string): Promise<number> {
+  const rounds = await roundsCollection
+    .query(Q.where('game_id', gameId))
+    .fetchCount()
+  return rounds
 }
