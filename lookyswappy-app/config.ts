@@ -6,17 +6,30 @@
 
 import Constants from 'expo-constants'
 
-// Get API URL from Expo constants or environment, with fallback for development
+// Get API URL from EAS environment or Expo constants
 const getApiUrl = (): string => {
-  // Check Expo constants first (set via app.config.js)
+  // Check EAS build environment variable (set in eas.json)
+  if (process.env.API_URL) {
+    return process.env.API_URL
+  }
+
+  // Check Expo constants (set via app.config.js or extra)
   const expoApiUrl = Constants.expoConfig?.extra?.apiUrl
   if (expoApiUrl) {
     return expoApiUrl
   }
 
   // Default to localhost for development
-  // In production, this should be set via Expo constants
   return 'http://localhost:8000'
+}
+
+// Get current app environment
+export const getAppEnvironment = (): 'development' | 'preview' | 'production' => {
+  const env = process.env.APP_ENV
+  if (env === 'production' || env === 'preview') {
+    return env
+  }
+  return 'development'
 }
 
 export const config = {
