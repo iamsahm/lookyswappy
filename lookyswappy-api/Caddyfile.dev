@@ -1,0 +1,12 @@
+# Development Caddyfile - HTTP only, no SSL
+
+:80 {
+    # Proxy all requests to API
+    reverse_proxy api:8000
+
+    # Access logging to stdout for development
+    log {
+        output stdout
+        format console
+    }
+}
