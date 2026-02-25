@@ -54,18 +54,29 @@ jobs:
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.2.1
+        env:
+          # Pass values as environment variables to avoid shell injection
+          DEPLOY_IMAGE: ghcr.io/${{ github.repository }}/api:${{ github.sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_IMAGE
           script: |
+            set -e  # Exit on error
             cd /opt/lookyswappy
 
             # Pull latest image
-            docker pull ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            docker pull "$DEPLOY_IMAGE"
 
             # Update docker-compose to use new image
-            export API_IMAGE=ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+            export API_IMAGE="$DEPLOY_IMAGE"
+
+            # Backup database before migrations
+            BACKUP_FILE="/opt/lookyswappy/backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql"
+            mkdir -p /opt/lookyswappy/backups
+            docker compose exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "$BACKUP_FILE"
+            echo "Database backed up to $BACKUP_FILE"
 
             # Run migrations
             docker compose run --rm api alembic upgrade head
@@ -75,6 +86,9 @@ jobs:
 
             # Cleanup old images
             docker image prune -f
+
+            # Keep only last 5 backups
+            ls -t /opt/lookyswappy/backups/*.sql | tail -n +6 | xargs -r rm --
 
       - name: Health check
         run: |
