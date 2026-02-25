@@ -20,8 +20,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # Database only accessible from backend network (no external access)
     networks:
-      - lookyswappy-network
+      - backend
+    # Security: drop unnecessary capabilities
+    security_opt:
+      - no-new-privileges:true
 
   # FastAPI Application
   api:
@@ -45,8 +49,16 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # API needs access to both networks: backend (db) and frontend (caddy)
     networks:
-      - lookyswappy-network
+      - backend
+      - frontend
+    # Security: drop unnecessary capabilities, read-only filesystem
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
   # Caddy Reverse Proxy
   caddy:
@@ -63,8 +75,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # Caddy only needs frontend network (no direct db access)
     networks:
-      - lookyswappy-network
+      - frontend
+    # Security: drop unnecessary capabilities
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:
@@ -75,6 +91,12 @@ volumes:
     name: lookyswappy-caddy-config
 
 networks:
-  lookyswappy-network:
-    name: lookyswappy-network
+  # Internal network for database access (not exposed externally)
+  backend:
+    name: lookyswappy-backend
+    driver: bridge
+    internal: true
+  # Frontend network for public-facing services
+  frontend:
+    name: lookyswappy-frontend
     driver: bridge

@@ -7,6 +7,10 @@ services:
   db:
     ports:
       - "5432:5432"
+    # In dev, also join frontend network for easier debugging
+    networks:
+      - backend
+      - frontend
 
   # API with hot reload and source code mounting
   api:
@@ -27,6 +31,9 @@ services:
     healthcheck:
       interval: 10s
       start_period: 10s
+    # Disable read-only filesystem for hot reload in dev
+    read_only: false
+    tmpfs: []
 
   # Caddy with simplified config for local dev
   caddy:
@@ -37,3 +44,8 @@ services:
     # Don't require healthy API for caddy in dev
     depends_on:
       - api
+
+# Make backend network non-internal in dev for easier debugging
+networks:
+  backend:
+    internal: false
