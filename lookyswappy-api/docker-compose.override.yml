@@ -1,0 +1,39 @@
+# Development overrides for docker-compose
+# Usage: docker compose up (automatically uses this file)
+# Or explicitly: docker compose -f docker-compose.yml -f docker-compose.override.yml up
+
+services:
+  # Database with exposed port for local access
+  db:
+    ports:
+      - "5432:5432"
+
+  # API with hot reload and source code mounting
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app:cached
+      - /app/__pycache__
+      - /app/.pytest_cache
+    environment:
+      DEBUG: "true"
+      CORS_ORIGINS: '["http://localhost:8081","http://localhost:19006","http://127.0.0.1:8081"]'
+    # Override healthcheck for faster startup in dev
+    healthcheck:
+      interval: 10s
+      start_period: 10s
+
+  # Caddy with simplified config for local dev
+  caddy:
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # Don't require healthy API for caddy in dev
+    depends_on:
+      - api

@@ -1,0 +1,80 @@
+# Lookyswappy API - Docker Compose Configuration
+# Production: docker compose up -d
+# Development: docker compose -f docker-compose.yml -f docker-compose.override.yml up
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: lookyswappy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lookyswappy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-lookyswappy}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lookyswappy} -d ${POSTGRES_DB:-lookyswappy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lookyswappy-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: lookyswappy-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lookyswappy}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-lookyswappy}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["https://lookyswappy.com"]}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - lookyswappy-network
+
+  # Caddy Reverse Proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: lookyswappy-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - lookyswappy-network
+
+volumes:
+  postgres_data:
+    name: lookyswappy-postgres-data
+  caddy_data:
+    name: lookyswappy-caddy-data
+  caddy_config:
+    name: lookyswappy-caddy-config
+
+networks:
+  lookyswappy-network:
+    name: lookyswappy-network
+    driver: bridge

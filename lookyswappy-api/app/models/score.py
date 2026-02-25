@@ -1,26 +1,50 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+import uuid
+from typing import TYPE_CHECKING
+
+from sqlalchemy import ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import SyncableBase
 
+if TYPE_CHECKING:
+    from app.models.player import GamePlayer
+    from app.models.round import Round
+
 
 class Score(SyncableBase):
-    """Score for a player in a specific round."""
+    """A player's score for a single round."""
 
     __tablename__ = "scores"
 
-    round_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("rounds.id"), nullable=False
+    round_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rounds.id"),
+        index=True,
     )
-    player_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("game_players.id"), nullable=False
+    player_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("game_players.id"),
+        index=True,
     )
-    raw_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    bonus_applied: Mapped[bool] = mapped_column(Boolean, default=False)
-    final_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_score: Mapped[int] = mapped_column(
+        Integer,
+        comment="Score before bonus",
+    )
+    bonus_applied: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="-25 or 0",
+    )
+    final_score: Mapped[int] = mapped_column(
+        Integer,
+        comment="raw_score + bonus_applied",
+    )
+    total_after: Mapped[int] = mapped_column(
+        Integer,
+        comment="Running total after this round",
+    )
 
     # Relationships
-    round: Mapped["Round"] = relationship("Round", back_populates="scores")  # noqa: F821
-    player: Mapped["GamePlayer"] = relationship(  # noqa: F821
-        "GamePlayer", back_populates="scores"
-    )
+    round: Mapped["Round"] = relationship(back_populates="scores")
+    player: Mapped["GamePlayer"] = relationship(back_populates="scores")
