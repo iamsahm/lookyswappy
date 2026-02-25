@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourname.lookyswappyscorer"
+      "bundleIdentifier": "com.lookyswappy.scorer"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.yourname.lookyswappyscorer"
+      "package": "com.lookyswappy.scorer"
     },
     "web": {
       "bundler": "metro",
@@ -38,11 +38,18 @@
     "experiments": {
       "typedRoutes": true
     },
+    "updates": {
+      "url": "https://u.expo.dev/476e3cff-cfd2-4aac-b6e4-c45497bf1eac"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "extra": {
       "router": {},
       "eas": {
         "projectId": "476e3cff-cfd2-4aac-b6e4-c45497bf1eac"
       }
-    }
+    },
+    "owner": "lookyswappy"
   }
 }

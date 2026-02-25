@@ -1,7 +1,6 @@
 # Claude Code settings and agents
 .claude/
 CLAUDE.md
-.github/
 
 # Environment files
 .env
