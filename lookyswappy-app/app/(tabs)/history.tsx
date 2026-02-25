@@ -23,23 +23,40 @@ export default function HistoryScreen() {
         .query(Q.where('status', 'completed'), Q.sortBy('ended_at', Q.desc))
         .fetch()
 
-      const gamesWithPlayers: GameHistoryItem[] = []
+      if (completedGames.length === 0) {
+        setGames([])
+        return
+      }
 
-      for (const game of completedGames) {
-        const players = await playersCollection
-          .query(Q.where('game_id', game.id))
-          .fetch()
+      // Batch fetch all players for completed games (avoids N+1 query)
+      const gameIds = completedGames.map((g) => g.id)
+      const allPlayers = await playersCollection
+        .query(Q.where('game_id', Q.oneOf(gameIds)))
+        .fetch()
 
+      // Group players by game ID
+      const playersByGameId = new Map<string, GamePlayer[]>()
+      for (const player of allPlayers) {
+        const players = playersByGameId.get(player.gameId) || []
+        players.push(player)
+        playersByGameId.set(player.gameId, players)
+      }
+
+      // Build game history items
+      const gamesWithPlayers: GameHistoryItem[] = completedGames.map((game) => {
+        const players = (playersByGameId.get(game.id) || []).sort(
+          (a, b) => a.position - b.position
+        )
         const winner = game.winnerId
           ? players.find((p) => p.id === game.winnerId)
           : null
 
-        gamesWithPlayers.push({
+        return {
           game,
-          players: players.sort((a, b) => a.position - b.position),
+          players,
           winnerName: winner?.name || null,
-        })
-      }
+        }
+      })
 
       setGames(gamesWithPlayers)
     } catch (error) {

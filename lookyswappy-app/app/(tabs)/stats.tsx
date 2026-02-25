@@ -37,13 +37,35 @@ export default function StatsScreen() {
 
   const calculateStats = useCallback(async () => {
     try {
-      // Get all games
-      const allGames = await gamesCollection.query().fetch()
+      // Batch fetch all data upfront to avoid N+1 queries
+      const [allGames, allPlayers, allScores] = await Promise.all([
+        gamesCollection.query().fetch(),
+        playersCollection.query().fetch(),
+        scoresCollection.query().fetch(),
+      ])
+
       const completedGames = allGames.filter((g) => g.status === 'completed')
       const activeGames = allGames.filter((g) => g.status === 'active')
 
-      // Get all players grouped by name
-      const allPlayers = await playersCollection.query().fetch()
+      // Create lookup maps for efficient access
+      const gameById = new Map(allGames.map((g) => [g.id, g]))
+      const completedGameIds = new Set(completedGames.map((g) => g.id))
+
+      // Group scores by player ID for bonus counting
+      const scoresByPlayerId = new Map<string, typeof allScores>()
+      for (const score of allScores) {
+        const scores = scoresByPlayerId.get(score.playerId) || []
+        scores.push(score)
+        scoresByPlayerId.set(score.playerId, scores)
+      }
+
+      // Group players by game ID for round counting
+      const playersByGameId = new Map<string, GamePlayer[]>()
+      for (const player of allPlayers) {
+        const players = playersByGameId.get(player.gameId) || []
+        players.push(player)
+        playersByGameId.set(player.gameId, players)
+      }
 
       // Build player stats by name
       const playerNameMap = new Map<
@@ -52,8 +74,8 @@ export default function StatsScreen() {
       >()
 
       for (const player of allPlayers) {
-        const game = allGames.find((g) => g.id === player.gameId)
-        if (!game || game.status !== 'completed') continue
+        const game = gameById.get(player.gameId)
+        if (!game || !completedGameIds.has(game.id)) continue
 
         const existing = playerNameMap.get(player.name) || {
           gamesPlayed: 0,
@@ -69,11 +91,9 @@ export default function StatsScreen() {
           existing.wins++
         }
 
-        // Get bonus count for this player
-        const scores = await scoresCollection
-          .query(Q.where('player_id', player.id))
-          .fetch()
-        existing.bonuses += scores.filter((s) => s.bonusApplied !== 0).length
+        // Count bonuses from pre-fetched scores (no additional query)
+        const playerScores = scoresByPlayerId.get(player.id) || []
+        existing.bonuses += playerScores.filter((s) => s.bonusApplied !== 0).length
 
         playerNameMap.set(player.name, existing)
       }
@@ -92,18 +112,13 @@ export default function StatsScreen() {
         }))
         .sort((a, b) => b.wins - a.wins)
 
-      // Calculate total rounds and average game length
+      // Calculate total rounds and average game length (no additional queries)
       let totalRounds = 0
       for (const game of completedGames) {
-        const players = await playersCollection
-          .query(Q.where('game_id', game.id))
-          .fetch()
-        if (players.length > 0) {
-          // Get round count by checking scores
-          const firstPlayer = players[0]
-          const scores = await scoresCollection
-            .query(Q.where('player_id', firstPlayer.id))
-            .fetch()
+        const gamePlayers = playersByGameId.get(game.id) || []
+        if (gamePlayers.length > 0) {
+          const firstPlayer = gamePlayers[0]
+          const scores = scoresByPlayerId.get(firstPlayer.id) || []
           totalRounds += scores.length
         }
       }
@@ -113,13 +128,10 @@ export default function StatsScreen() {
           ? Math.round(totalRounds / completedGames.length)
           : 0
 
-      // Calculate most common bonus landing
+      // Calculate most common bonus landing (using pre-fetched scores)
       const bonusCounts = new Map<number, number>()
-      const allScores = await scoresCollection.query().fetch()
-
       for (const score of allScores) {
         if (score.bonusApplied !== 0) {
-          // The bonus landing point is totalAfter (when bonus was applied)
           const landingPoint = score.totalAfter
           const count = bonusCounts.get(landingPoint) || 0
           bonusCounts.set(landingPoint, count + 1)
