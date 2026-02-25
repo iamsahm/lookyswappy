@@ -1,0 +1,145 @@
+name: Claude Linear Ticket Automation
+
+on:
+  # Manual trigger with ticket selection
+  workflow_dispatch:
+    inputs:
+      ticket_id:
+        description: 'Linear ticket ID (e.g., SDR-5)'
+        required: true
+        type: string
+      max_iterations:
+        description: 'Max review iterations'
+        required: false
+        default: '3'
+        type: string
+
+  # Scheduled run - picks up highest priority ticket
+  schedule:
+    - cron: '0 9 * * 1-5'  # 9 AM UTC, Monday-Friday
+
+jobs:
+  process-ticket:
+    name: Process Linear Ticket
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "Claude Bot"
+          git config --global user.email "claude-bot@users.noreply.github.com"
+
+      - name: Process ticket with Claude
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are processing Linear ticket: ${{ github.event.inputs.ticket_id || 'AUTO_SELECT' }}
+
+            ## Workflow Instructions
+
+            ### Phase 1: Planning
+            1. If ticket_id is 'AUTO_SELECT', use the Linear MCP to find the highest priority
+               unassigned ticket in the backlog
+            2. Use the @planner agent to break down the ticket into implementation steps
+            3. Create a new branch: `claude-bot/sdr-{number}-{short-description}`
+
+            ### Phase 2: Implementation
+            4. Implement the solution following the plan
+            5. Write tests for new functionality
+            6. Run linting and tests to verify
+            7. Commit changes with conventional commit messages
+
+            ### Phase 3: Create PR
+            8. Push the branch to origin
+            9. Create a pull request with:
+               - Title: conventional commit format
+               - Description: summary, changes list, test plan
+               - Link to Linear ticket
+
+            ### Phase 4: Self-Review Loop (max ${{ github.event.inputs.max_iterations || '3' }} iterations)
+            10. Use the @reviewer agent to critique the changes
+            11. If reviewer finds critical issues:
+                - Use the @iterator agent to fix them
+                - Commit fixes
+                - Go back to step 10
+            12. If reviewer approves (score >= 8), proceed to finalize
+
+            ### Phase 5: Finalize
+            13. Update the PR description with final review summary
+            14. Add label "ready-for-human-review"
+            15. Update Linear ticket status to "In Review"
+
+            ## Important
+            - Stop if you encounter errors you can't resolve
+            - Don't force push or rewrite history
+            - Keep commits atomic and well-described
+            - If tests fail, fix them before proceeding
+
+          allowed_tools: |
+            Read,Write,Edit,Bash,Glob,Grep,Task,WebFetch
+
+          max_turns: 50
+
+          # MCP servers for Linear integration
+          mcp_config: |
+            {
+              "mcpServers": {
+                "linear": {
+                  "command": "npx",
+                  "args": ["-y", "@anthropic/linear-mcp-server"],
+                  "env": {
+                    "LINEAR_API_KEY": "${{ secrets.LINEAR_API_KEY }}"
+                  }
+                }
+              }
+            }
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-automation-logs
+          path: |
+            ~/.claude/logs/
+          retention-days: 7
+
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: process-ticket
+    if: failure()
+    steps:
+      - name: Create issue on failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Claude automation failed for ticket ${{ github.event.inputs.ticket_id }}`,
+              body: `The automated workflow failed. Check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`,
+              labels: ['automation-failure']
+            });
