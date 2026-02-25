@@ -16,8 +16,17 @@
         "gradleCommand": ":app:assembleDebug"
       },
       "env": {
+        "APP_ENV": "development"
+      }
+    },
+    "development:device": {
+      "extends": "development",
+      "ios": {
+        "simulator": false
+      },
+      "env": {
         "APP_ENV": "development",
-        "API_URL": "http://localhost:8000"
+        "API_URL": "${DEV_API_URL}"
       }
     },
     "preview": {
@@ -58,7 +67,7 @@
         "appleTeamId": "${APPLE_TEAM_ID}"
       },
       "android": {
-        "serviceAccountKeyPath": "./credentials/google-service-account.json",
+        "serviceAccountKeyPath": "${GOOGLE_SERVICE_ACCOUNT_KEY_PATH}",
         "track": "internal"
       }
     }
