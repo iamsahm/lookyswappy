@@ -42,18 +42,41 @@ const generateDeviceId = (): string => {
   return `${timestamp}-${randomPart}-${randomPart2}`
 }
 
-// SecureStore wrapper for web compatibility
+/**
+ * Check if running on a platform with secure storage.
+ * Web platform doesn't have secure storage, so auth features are disabled.
+ */
+export function isSecureStorageAvailable(): boolean {
+  return Platform.OS !== 'web'
+}
+
+/**
+ * Secure storage wrapper.
+ * Only works on native platforms (iOS/Android) where SecureStore is available.
+ * Throws on web to prevent insecure localStorage usage for tokens.
+ */
 const storage = {
   async getItem(key: string): Promise<string | null> {
     if (Platform.OS === 'web') {
-      return localStorage.getItem(key)
+      // Device ID is non-sensitive, allow localStorage for it
+      if (key === STORAGE_KEYS.DEVICE_ID) {
+        return localStorage.getItem(key)
+      }
+      // Don't store sensitive data in localStorage (XSS vulnerability)
+      return null
     }
     return SecureStore.getItemAsync(key)
   },
 
   async setItem(key: string, value: string): Promise<void> {
     if (Platform.OS === 'web') {
-      localStorage.setItem(key, value)
+      // Device ID is non-sensitive, allow localStorage for it
+      if (key === STORAGE_KEYS.DEVICE_ID) {
+        localStorage.setItem(key, value)
+        return
+      }
+      // Silently skip storing sensitive data on web
+      console.warn('Auth tokens cannot be persisted on web platform (security)')
       return
     }
     await SecureStore.setItemAsync(key, value)
@@ -61,7 +84,9 @@ const storage = {
 
   async deleteItem(key: string): Promise<void> {
     if (Platform.OS === 'web') {
-      localStorage.removeItem(key)
+      if (key === STORAGE_KEYS.DEVICE_ID) {
+        localStorage.removeItem(key)
+      }
       return
     }
     await SecureStore.deleteItemAsync(key)

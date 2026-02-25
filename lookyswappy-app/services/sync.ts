@@ -75,6 +75,32 @@ interface PushResponse {
 let lastSyncTimestamp = 0
 let isSyncing = false
 let syncRetryCount = 0
+let retryTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+// Fetch timeout constant (30 seconds)
+const FETCH_TIMEOUT_MS = 30000
+
+/**
+ * Fetch with timeout to prevent hanging requests.
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+    return response
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
 
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'offline'
 
@@ -244,7 +270,7 @@ async function pullChanges(args: SyncPullArgs): Promise<{
   const headers = await getAuthHeaders()
 
   const url = `${getApiEndpoint('/sync/pull')}?last_pulled_at=${lastPulledAt ?? 0}`
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'GET',
     headers: {
       ...headers,
@@ -384,7 +410,7 @@ async function pushChanges(args: SyncPushArgs): Promise<void> {
     },
   }
 
-  const response = await fetch(getApiEndpoint('/sync/push'), {
+  const response = await fetchWithTimeout(getApiEndpoint('/sync/push'), {
     method: 'POST',
     headers: {
       ...headers,
@@ -409,9 +435,22 @@ async function pushChanges(args: SyncPushArgs): Promise<void> {
 }
 
 /**
+ * Cancel any pending retry.
+ */
+export function cancelSyncRetry(): void {
+  if (retryTimeoutId) {
+    clearTimeout(retryTimeoutId)
+    retryTimeoutId = null
+  }
+}
+
+/**
  * Perform a full database sync with the server.
  */
 export async function syncDatabase(): Promise<SyncResult> {
+  // Cancel any pending retry before starting a new sync
+  cancelSyncRetry()
+
   // Prevent concurrent syncs
   if (isSyncing) {
     return { success: false, error: 'Sync already in progress' }
@@ -443,14 +482,18 @@ export async function syncDatabase(): Promise<SyncResult> {
     return { success: true, timestamp: lastSyncTimestamp }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown sync error'
+    console.error('Sync failed:', errorMessage)
 
-    // Handle retries
+    // Handle retries with proper cleanup
     syncRetryCount++
     if (syncRetryCount < config.sync.maxRetries) {
-      // Schedule retry
-      setTimeout(() => {
+      // Schedule retry - store the timeout ID so it can be cancelled
+      retryTimeoutId = setTimeout(() => {
+        retryTimeoutId = null
         syncDatabase()
       }, config.sync.retryDelay)
+    } else {
+      console.error(`Sync failed after ${config.sync.maxRetries} retries`)
     }
 
     setStatus('error')
@@ -498,9 +541,10 @@ export function startNetworkListener(): void {
 }
 
 /**
- * Stop the network listener.
+ * Stop the network listener and cancel pending retries.
  */
 export function stopNetworkListener(): void {
+  cancelSyncRetry()
   if (unsubscribeNetInfo) {
     unsubscribeNetInfo()
     unsubscribeNetInfo = null
