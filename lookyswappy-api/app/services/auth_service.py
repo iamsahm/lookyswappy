@@ -1,49 +1,78 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
-from jose import jwt
+from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.models import Device
 
 settings = get_settings()
 
 
-def create_access_token(device_id: str) -> tuple[str, int]:
-    """Create a JWT access token for a device.
+class AuthService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
 
-    Returns:
-        Tuple of (token, expires_in_seconds)
-    """
-    expires_delta = timedelta(days=settings.jwt_expire_days)
-    expire = datetime.now(timezone.utc) + expires_delta
+    async def register_device(self, device_id: str) -> tuple[Device, str]:
+        """Register a new device or return existing one."""
 
-    to_encode = {
-        "sub": device_id,
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-    }
+        # Check if device already exists
+        stmt = select(Device).where(Device.device_id == device_id)
+        result = await self.db.execute(stmt)
+        device = result.scalar_one_or_none()
 
-    token = jwt.encode(
-        to_encode,
-        settings.jwt_secret,
-        algorithm=settings.jwt_algorithm,
-    )
+        if device:
+            # Update last_seen
+            device.last_seen = datetime.now(timezone.utc)
+        else:
+            # Create new device
+            device = Device(device_id=device_id)
+            self.db.add(device)
 
-    expires_in = int(expires_delta.total_seconds())
-    return token, expires_in
+        await self.db.commit()
+        await self.db.refresh(device)
 
+        # Generate token
+        token = self._create_token(device)
 
-def verify_token(token: str) -> str | None:
-    """Verify a JWT token and return the device ID.
+        return device, token
 
-    Returns:
-        Device ID if valid, None otherwise
-    """
-    try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret,
-            algorithms=[settings.jwt_algorithm],
-        )
-        return payload.get("sub")
-    except jwt.JWTError:
-        return None
+    async def get_device_by_id(self, device_db_id: uuid.UUID) -> Device | None:
+        """Get device by database ID."""
+        stmt = select(Device).where(Device.id == device_db_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def refresh_token(self, device: Device) -> str:
+        """Generate a new token for an existing device."""
+        device.last_seen = datetime.now(timezone.utc)
+        await self.db.commit()
+        return self._create_token(device)
+
+    def _create_token(self, device: Device) -> str:
+        """Create a JWT token for the device."""
+        expires = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expire_days)
+
+        payload = {
+            "sub": str(device.id),  # Device's database UUID
+            "device_id": device.device_id,  # Client-generated UUID
+            "exp": expires,
+            "iat": datetime.now(timezone.utc),
+        }
+
+        return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+    @staticmethod
+    def decode_token(token: str) -> dict | None:
+        """Decode and validate a JWT token."""
+        try:
+            payload = jwt.decode(
+                token,
+                settings.jwt_secret,
+                algorithms=[settings.jwt_algorithm],
+            )
+            return payload
+        except JWTError:
+            return None
